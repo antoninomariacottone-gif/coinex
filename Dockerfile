@@ -13,6 +13,6 @@ COPY README.md .
 
 RUN mkdir -p /app/runtime
 
-EXPOSE 8000
+EXPOSE 8080
 
-CMD ["/bin/sh", "-c", "uvicorn coinex_trade_bot.web_app:app --host 0.0.0.0 --port ${PORT:-8000}"]
+CMD ["/bin/sh", "-c", "uvicorn coinex_trade_bot.web_app:app --host 0.0.0.0 --port ${PORT:-8080}"]
