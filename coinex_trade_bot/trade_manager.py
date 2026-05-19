@@ -386,7 +386,7 @@ class TradeManager:
         for item in state_list:
             if item.get("market") != signal.market:
                 continue
-            last = Decimal(item["last"])
+            last = self._select_trigger_price(item)
             target_1 = signal.targets[0]
             touched = last >= target_1 if signal.side == "long" else last <= target_1
             if touched:
@@ -505,12 +505,19 @@ class TradeManager:
         try:
             await self._subscribe(conn, "state.subscribe", [signal.market], request_id=30)
             asyncio.create_task(self.client.ws_ping(conn))
+            await self._reconcile_paper_price(signal, plan, state, market_info)
 
             while not state.closed:
-                message = await self.client.ws_recv_json(conn)
-                if message.get("method") != "state.update":
-                    continue
-                await self._handle_paper_price_update(message["data"]["state_list"], signal, plan, state, market_info)
+                try:
+                    message = await asyncio.wait_for(self.client.ws_recv_json(conn), timeout=5)
+                    if message.get("method") != "state.update":
+                        continue
+                    await self._handle_paper_price_update(message["data"]["state_list"], signal, plan, state, market_info)
+                except asyncio.TimeoutError:
+                    await self._reconcile_paper_price(signal, plan, state, market_info)
+        except Exception as exc:
+            self._touch(state, note=f"Paper monitor failed: {exc}", status="error")
+            raise
         finally:
             await conn.close()
 
@@ -526,7 +533,7 @@ class TradeManager:
             if item.get("market") != signal.market:
                 continue
 
-            last = Decimal(item["last"])
+            last = self._select_trigger_price(item)
             while state.completed_target_count < len(signal.targets):
                 target_index = state.completed_target_count
                 target_price = signal.targets[target_index]
@@ -591,3 +598,36 @@ class TradeManager:
         total_risk = risk_per_unit * initial_size
         if total_risk > 0:
             state.realized_r_multiple = format(realized / total_risk, "f")
+
+    async def _reconcile_paper_price(
+        self,
+        signal: ParsedSignal,
+        plan: PositionPlan,
+        state: ManagedTradeState,
+        market_info: MarketInfo,
+    ) -> None:
+        try:
+            ticker = self.client.get_futures_ticker(signal.market)
+        except Exception as exc:  # noqa: BLE001
+            LOGGER.warning("Paper price reconciliation failed for %s: %s", signal.market, exc)
+            return
+
+        synthetic_state = {
+            "market": signal.market,
+            "last": ticker.get("last"),
+            "mark_price": ticker.get("mark_price"),
+            "index_price": ticker.get("index_price"),
+        }
+        await self._handle_paper_price_update([synthetic_state], signal, plan, state, market_info)
+
+    def _select_trigger_price(self, item: dict) -> Decimal:
+        price_type = self.settings.trigger_price_type
+        if price_type == "mark_price":
+            candidate = item.get("mark_price") or item.get("last")
+        elif price_type == "index_price":
+            candidate = item.get("index_price") or item.get("last")
+        else:
+            candidate = item.get("last")
+        if candidate is None:
+            raise RuntimeError(f"Missing trigger price in market update for price type {price_type}")
+        return Decimal(str(candidate))

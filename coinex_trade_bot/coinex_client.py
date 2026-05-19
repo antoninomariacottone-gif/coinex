@@ -95,6 +95,12 @@ class CoinExClient:
     def get_futures_balance(self) -> Any:
         return self._request("GET", "/assets/futures/balance")
 
+    def get_futures_ticker(self, market: str) -> dict[str, Any]:
+        data = self._request("GET", "/futures/ticker", params={"market": market})
+        if not data:
+            raise ValueError(f"Ticker for {market} not found on CoinEx futures")
+        return data[0]
+
     def adjust_leverage(self, market: str, leverage: int | None = None) -> Any:
         return self._request(
             "POST",
