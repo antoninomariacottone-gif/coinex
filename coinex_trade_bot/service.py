@@ -5,6 +5,7 @@ import logging
 from decimal import Decimal
 from typing import Any
 
+from coinex_trade_bot.activity_log import ActivityLog
 from coinex_trade_bot.coinex_client import CoinExClient
 from coinex_trade_bot.config import Settings
 from coinex_trade_bot.demo_channel_store import DemoChannelStore
@@ -19,11 +20,12 @@ LOGGER = logging.getLogger("coinex_trade_bot.service")
 
 
 class BotService:
-    def __init__(self, settings: Settings, client: CoinExClient, store: StateStore, demo_channel_store: DemoChannelStore):
+    def __init__(self, settings: Settings, client: CoinExClient, store: StateStore, demo_channel_store: DemoChannelStore, activity_log: ActivityLog):
         self.settings = settings
         self.client = client
         self.store = store
         self.demo_channel_store = demo_channel_store
+        self.activity_log = activity_log
         self.trade_manager = TradeManager(settings, client, store)
         self._trade_tasks: dict[str, asyncio.Task] = {}
         self._lock = asyncio.Lock()
@@ -211,6 +213,7 @@ class BotService:
             "test_hold_seconds": self.settings.test_hold_seconds,
             "paper_stats": self._build_paper_stats(),
             "demo_channels": self._build_demo_channel_views(),
+            "recent_activity": self.activity_log.latest(40),
             "telegram": {
                 "enabled": self.settings.telegram_enabled,
                 "configured": bool(
@@ -277,46 +280,64 @@ class BotService:
         async with self._lock:
             signal = parse_signal(signal_text, break_even_override=self.settings.break_even_price_override)
             original_entry_price = signal.entry_price
-            if execution_mode == "paper":
-                signal = self.trade_manager.prepare_paper_signal(signal)
-            self._ensure_trade_slot_available(signal.market, signal.side, execution_mode=execution_mode)
-            market_info = self.client.get_market_info(signal.market)
-            plan = self.trade_manager.build_position_plan(signal, market_info, leverage=leverage, balance_pct=balance_pct)
-            summary = self.trade_manager.summarize(
-                signal,
-                plan,
-                market_info,
-                leverage=leverage,
-                balance_pct=balance_pct,
-                execution_mode=execution_mode,
-            )
-            if execution_mode == "paper":
-                state = await self.trade_manager.run_new_paper_trade(
+            try:
+                if execution_mode == "paper":
+                    signal = self.trade_manager.prepare_paper_signal(signal)
+                self._ensure_trade_slot_available(signal.market, signal.side, execution_mode=execution_mode)
+                market_info = self.client.get_market_info(signal.market)
+                plan = self.trade_manager.build_position_plan(signal, market_info, leverage=leverage, balance_pct=balance_pct)
+                summary = self.trade_manager.summarize(
                     signal,
-                    leverage_override=leverage,
-                    balance_pct_override=balance_pct,
-                    source_label=source_label,
+                    plan,
+                    market_info,
+                    leverage=leverage,
+                    balance_pct=balance_pct,
+                    execution_mode=execution_mode,
                 )
-                state.signal_entry_price = format(original_entry_price, "f")
-                self.store.save(state)
-            else:
-                state = await self.trade_manager.run_new_trade(
-                    signal,
-                    leverage_override=leverage,
-                    balance_pct_override=balance_pct,
-                    source_label=source_label,
-                )
+                if execution_mode == "paper":
+                    state = await self.trade_manager.run_new_paper_trade(
+                        signal,
+                        leverage_override=leverage,
+                        balance_pct_override=balance_pct,
+                        source_label=source_label,
+                    )
+                    state.signal_entry_price = format(original_entry_price, "f")
+                    self.store.save(state)
+                else:
+                    state = await self.trade_manager.run_new_trade(
+                        signal,
+                        leverage_override=leverage,
+                        balance_pct_override=balance_pct,
+                        source_label=source_label,
+                    )
 
-            if not state.closed and state.status != "dry_run":
-                self._register_trade_task(
-                    state.trade_id,
-                    asyncio.create_task(self.trade_manager.resume_trade_from_state(self.store.load(state.trade_id) or state)),
+                if not state.closed and state.status != "dry_run":
+                    self._register_trade_task(
+                        state.trade_id,
+                        asyncio.create_task(self.trade_manager.resume_trade_from_state(self.store.load(state.trade_id) or state)),
+                    )
+                summary["trade_id"] = state.trade_id
+                summary["market_side_key"] = state.market_side_key
+                summary["execution_mode"] = state.execution_mode
+                summary["signal_entry_price"] = None if state.signal_entry_price is None else state.signal_entry_price
+                self.activity_log.append(
+                    f"{execution_mode}_accepted",
+                    f"{signal.market} {signal.side} accepted",
+                    source_label=source_label,
+                    market=signal.market,
+                    side=signal.side,
                 )
-            summary["trade_id"] = state.trade_id
-            summary["market_side_key"] = state.market_side_key
-            summary["execution_mode"] = state.execution_mode
-            summary["signal_entry_price"] = None if state.signal_entry_price is None else state.signal_entry_price
-            return summary
+                return summary
+            except Exception as exc:
+                self.activity_log.append(
+                    f"{execution_mode}_rejected",
+                    str(exc),
+                    source_label=source_label,
+                    parsed_market=signal.market,
+                    parsed_side=signal.side,
+                    signal_entry_price=format(original_entry_price, 'f'),
+                )
+                raise
 
     async def test_connection(self) -> dict[str, Any]:
         market_info = self.client.get_market_info(self.settings.test_market)

@@ -13,6 +13,7 @@ from pydantic import BaseModel
 
 from coinex_trade_bot.coinex_client import CoinExClient
 from coinex_trade_bot.config import Settings, load_settings
+from coinex_trade_bot.activity_log import ActivityLog
 from coinex_trade_bot.demo_channel_store import DemoChannelStore
 from coinex_trade_bot.service import BotService
 from coinex_trade_bot.state_store import StateStore
@@ -33,6 +34,7 @@ def build_service() -> BotService:
         CoinExClient(settings),
         StateStore(settings.state_file),
         DemoChannelStore(settings.demo_channels_file),
+        ActivityLog(settings.activity_log_file),
     )
 
 
@@ -203,6 +205,8 @@ Obiettivi:
         <pre id="paperStatsBlock">Caricamento...</pre>
         <h2>Telegram</h2>
         <pre id="telegramBlock">Caricamento...</pre>
+        <h2>Ultime attività</h2>
+        <pre id="activityBlock">Caricamento...</pre>
         <h2>Risposta</h2>
         <pre id="result">Pronto.</pre>
       </div>
@@ -318,6 +322,9 @@ Obiettivi:
       document.getElementById("telegramBlock").textContent = data.telegram
         ? JSON.stringify(data.telegram, null, 2)
         : "Telegram non configurato";
+      document.getElementById("activityBlock").textContent = data.recent_activity
+        ? JSON.stringify(data.recent_activity, null, 2)
+        : "Nessuna attività recente";
       document.getElementById("demoChannelsList").innerHTML = (data.demo_channels || []).length
         ? data.demo_channels.map(renderDemoChannelCard).join("")
         : "<pre>Nessun canale demo configurato</pre>";

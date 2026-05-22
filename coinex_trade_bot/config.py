@@ -50,6 +50,7 @@ class Settings:
     break_even_price_override: Decimal | None
     state_file: Path
     demo_channels_file: Path
+    activity_log_file: Path
     log_level: str
     dashboard_username: str
     dashboard_password: str
@@ -105,6 +106,7 @@ def load_settings(allow_missing_secrets: bool = False) -> Settings:
 
     state_file = Path(os.getenv("STATE_FILE", r"runtime\active_trade.json"))
     demo_channels_file = Path(os.getenv("DEMO_CHANNELS_FILE", r"runtime\demo_channels.json"))
+    activity_log_file = Path(os.getenv("ACTIVITY_LOG_FILE", r"runtime\activity_log.json"))
     telegram_enabled = os.getenv("TELEGRAM_ENABLED", "false").strip().lower() == "true"
     telegram_api_id_raw = os.getenv("TELEGRAM_API_ID", "").strip()
     telegram_api_hash = os.getenv("TELEGRAM_API_HASH", "").strip()
@@ -127,6 +129,7 @@ def load_settings(allow_missing_secrets: bool = False) -> Settings:
         break_even_price_override=_parse_decimal("BREAK_EVEN_PRICE_OVERRIDE"),
         state_file=state_file,
         demo_channels_file=demo_channels_file,
+        activity_log_file=activity_log_file,
         log_level=os.getenv("LOG_LEVEL", "INFO").strip().upper(),
         dashboard_username=os.getenv("BOT_DASHBOARD_USERNAME", "admin").strip(),
         dashboard_password=_require("BOT_DASHBOARD_PASSWORD"),
