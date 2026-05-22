@@ -31,7 +31,7 @@ class TelegramSignalListener:
             and self.settings.telegram_api_id is not None
             and bool(self.settings.telegram_api_hash)
             and bool(self.settings.telegram_session_string)
-            and bool(self.settings.telegram_source_chats or self.settings.telegram_paper_source_chats)
+            and bool(self.settings.telegram_source_chats or self.bot_service.list_enabled_demo_channels() or self.settings.telegram_paper_source_chats)
         )
 
     async def start(self) -> None:
@@ -49,7 +49,13 @@ class TelegramSignalListener:
         )
         await self.client.connect()
 
-        async def _process_event(event, execution_mode: str, leverage: int | None, balance_pct: Decimal | None) -> None:  # noqa: ANN001
+        async def _process_event(
+            event,
+            execution_mode: str,
+            leverage: int | None,
+            balance_pct: Decimal | None,
+            source_label_override: str | None = None,
+        ) -> None:  # noqa: ANN001
             message = event.message
             if getattr(message, "reply_to", None) is not None:
                 LOGGER.info("Ignored Telegram message %s: reply/comment to another post", event.id)
@@ -73,7 +79,7 @@ class TelegramSignalListener:
                 return
 
             try:
-                source_label = getattr(event.chat, "username", None) or getattr(event.chat, "title", None) or str(event.chat_id)
+                source_label = source_label_override or getattr(event.chat, "username", None) or getattr(event.chat, "title", None) or str(event.chat_id)
                 summary = await self.bot_service.submit_signal(
                     text,
                     leverage=leverage,
@@ -97,31 +103,45 @@ class TelegramSignalListener:
                     exc,
                 )
 
-        if self.settings.telegram_source_chats:
-            @self.client.on(events.NewMessage(chats=self.settings.telegram_source_chats))
-            async def _handle_live_message(event) -> None:  # noqa: ANN001
+        @self.client.on(events.NewMessage())
+        async def _handle_any_message(event) -> None:  # noqa: ANN001
+            chat_username = getattr(event.chat, "username", None)
+            chat_title = getattr(event.chat, "title", None)
+            chat_id = str(event.chat_id)
+            live_refs = {value.lower() for value in self.settings.telegram_source_chats}
+            demo_channels = self.bot_service.list_enabled_demo_channels()
+
+            if chat_username and f"@{chat_username}".lower() in live_refs:
                 await _process_event(
                     event,
                     execution_mode="live",
                     leverage=self.settings.telegram_leverage,
                     balance_pct=self.settings.telegram_balance_pct,
                 )
+                return
 
-        if self.settings.telegram_paper_source_chats:
-            @self.client.on(events.NewMessage(chats=self.settings.telegram_paper_source_chats))
-            async def _handle_paper_message(event) -> None:  # noqa: ANN001
-                await _process_event(
-                    event,
-                    execution_mode="paper",
-                    leverage=self.settings.telegram_paper_leverage,
-                    balance_pct=self.settings.telegram_paper_balance_pct,
-                )
+            for channel in demo_channels:
+                ref = channel.telegram_ref.lower()
+                candidates = {
+                    chat_id.lower(),
+                    str(chat_title or "").lower(),
+                    f"@{str(chat_username or '').lower()}",
+                }
+                if ref in candidates:
+                    await _process_event(
+                        event,
+                        execution_mode="paper",
+                        leverage=channel.leverage,
+                        balance_pct=Decimal(channel.balance_pct),
+                        source_label_override=channel.name,
+                    )
+                    return
 
         self._run_task = asyncio.create_task(self.client.run_until_disconnected())
         LOGGER.info(
             "Telegram listener started. Live chats: %s | Paper chats: %s",
             ", ".join(self.settings.telegram_source_chats) or "-",
-            ", ".join(self.settings.telegram_paper_source_chats) or "-",
+            ", ".join(channel.telegram_ref for channel in self.bot_service.list_enabled_demo_channels()) or "-",
         )
 
     async def stop(self) -> None:
@@ -135,10 +155,10 @@ class TelegramSignalListener:
             "enabled": self.settings.telegram_enabled,
             "configured": self.configured,
             "source_chats": self.settings.telegram_source_chats,
-            "paper_source_chats": self.settings.telegram_paper_source_chats,
+            "paper_source_chats": [channel.telegram_ref for channel in self.bot_service.list_enabled_demo_channels()],
             "connected": bool(self.client and self.client.is_connected()),
             "balance_pct_override": None if self.settings.telegram_balance_pct is None else format(self.settings.telegram_balance_pct, "f"),
             "leverage_override": self.settings.telegram_leverage,
-            "paper_balance_pct_override": None if self.settings.telegram_paper_balance_pct is None else format(self.settings.telegram_paper_balance_pct, "f"),
-            "paper_leverage_override": self.settings.telegram_paper_leverage,
+            "paper_balance_pct_override": None,
+            "paper_leverage_override": None,
         }

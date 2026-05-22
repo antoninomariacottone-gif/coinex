@@ -18,6 +18,7 @@ class ParsedSignal:
     targets: list[Decimal]
     stop_loss: Decimal
     break_even_price: Decimal | None = None
+    entry_range: list[Decimal] = field(default_factory=list)
     raw_text: str = ""
 
     def to_dict(self) -> dict[str, Any]:
@@ -27,6 +28,7 @@ class ParsedSignal:
         data["stop_loss"] = decimal_to_str(self.stop_loss)
         if self.break_even_price is not None:
             data["break_even_price"] = decimal_to_str(self.break_even_price)
+        data["entry_range"] = [decimal_to_str(value) for value in self.entry_range]
         return data
 
 
@@ -117,3 +119,15 @@ class ManagedTradeState:
     @property
     def market_side_key(self) -> str:
         return f"{self.market}:{self.side}"
+
+
+@dataclass
+class DemoChannelConfig:
+    channel_id: str
+    name: str
+    telegram_ref: str
+    balance_pct: str
+    leverage: int
+    enabled: bool = True
+    created_at: int = 0
+    updated_at: int = 0

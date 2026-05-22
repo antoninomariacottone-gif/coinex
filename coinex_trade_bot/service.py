@@ -7,6 +7,8 @@ from typing import Any
 
 from coinex_trade_bot.coinex_client import CoinExClient
 from coinex_trade_bot.config import Settings
+from coinex_trade_bot.demo_channel_store import DemoChannelStore
+from coinex_trade_bot.models import DemoChannelConfig
 from coinex_trade_bot.models import ManagedTradeState, ParsedSignal
 from coinex_trade_bot.parser import parse_signal
 from coinex_trade_bot.state_store import StateStore
@@ -17,10 +19,11 @@ LOGGER = logging.getLogger("coinex_trade_bot.service")
 
 
 class BotService:
-    def __init__(self, settings: Settings, client: CoinExClient, store: StateStore):
+    def __init__(self, settings: Settings, client: CoinExClient, store: StateStore, demo_channel_store: DemoChannelStore):
         self.settings = settings
         self.client = client
         self.store = store
+        self.demo_channel_store = demo_channel_store
         self.trade_manager = TradeManager(settings, client, store)
         self._trade_tasks: dict[str, asyncio.Task] = {}
         self._lock = asyncio.Lock()
@@ -44,6 +47,37 @@ class BotService:
 
     def get_active_trades(self) -> list[ManagedTradeState]:
         return self.store.load_active()
+
+    def list_demo_channels(self) -> list[DemoChannelConfig]:
+        return self.demo_channel_store.list_all()
+
+    def list_enabled_demo_channels(self) -> list[DemoChannelConfig]:
+        return self.demo_channel_store.list_enabled()
+
+    def create_demo_channel(self, name: str, telegram_ref: str, balance_pct: Decimal, leverage: int) -> DemoChannelConfig:
+        return self.demo_channel_store.create(name=name, telegram_ref=telegram_ref, balance_pct=format(balance_pct, "f"), leverage=leverage)
+
+    def update_demo_channel(
+        self,
+        channel_id: str,
+        *,
+        name: str | None = None,
+        telegram_ref: str | None = None,
+        balance_pct: Decimal | None = None,
+        leverage: int | None = None,
+        enabled: bool | None = None,
+    ) -> DemoChannelConfig:
+        return self.demo_channel_store.update(
+            channel_id,
+            name=name,
+            telegram_ref=telegram_ref,
+            balance_pct=None if balance_pct is None else format(balance_pct, "f"),
+            leverage=leverage,
+            enabled=enabled,
+        )
+
+    def delete_demo_channel(self, channel_id: str) -> None:
+        self.demo_channel_store.delete(channel_id)
 
     def _build_paper_stats(self) -> dict[str, Any]:
         all_trades = self.store.load_all()
@@ -114,6 +148,44 @@ class BotService:
             "by_source": by_source_serialized,
         }
 
+    def _build_demo_channel_views(self) -> list[dict[str, Any]]:
+        stats = self._build_paper_stats().get("by_source", {})
+        views: list[dict[str, Any]] = []
+        for channel in self.demo_channel_store.list_all():
+            channel_stats = stats.get(channel.name) or stats.get(channel.telegram_ref) or {
+                "trade_count": 0,
+                "closed_count": 0,
+                "positive_count": 0,
+                "negative_count": 0,
+                "breakeven_count": 0,
+                "win_rate_pct": "0.00",
+                "realized_pnl_quote": "0",
+                "realized_r_total": "0",
+            }
+            views.append(
+                {
+                    "channel_id": channel.channel_id,
+                    "name": channel.name,
+                    "telegram_ref": channel.telegram_ref,
+                    "balance_pct": channel.balance_pct,
+                    "leverage": channel.leverage,
+                    "enabled": channel.enabled,
+                    "stats": channel_stats,
+                }
+            )
+        return views
+
+    def get_demo_channel_page(self, channel_id: str) -> dict[str, Any]:
+        channel = self.demo_channel_store.load(channel_id)
+        if channel is None:
+            raise RuntimeError(f"Demo channel {channel_id} not found")
+        trades = [trade for trade in self.store.load_all() if trade.execution_mode == "paper" and trade.source_label == channel.name]
+        return {
+            "channel": channel,
+            "trades": [trade.__dict__ for trade in trades],
+            "stats": self._build_paper_stats().get("by_source", {}).get(channel.name, {}),
+        }
+
     async def get_dashboard_status(self) -> dict[str, Any]:
         active_trades = self.store.load_active()
         configured = bool(self.settings.access_id and self.settings.secret_key)
@@ -126,18 +198,19 @@ class BotService:
             "test_market": self.settings.test_market,
             "test_hold_seconds": self.settings.test_hold_seconds,
             "paper_stats": self._build_paper_stats(),
+            "demo_channels": self._build_demo_channel_views(),
             "telegram": {
                 "enabled": self.settings.telegram_enabled,
                 "configured": bool(
                     self.settings.telegram_api_id
                     and self.settings.telegram_api_hash
                     and self.settings.telegram_session_string
-                    and (self.settings.telegram_source_chats or self.settings.telegram_paper_source_chats)
+                    and (self.settings.telegram_source_chats or self.demo_channel_store.list_enabled() or self.settings.telegram_paper_source_chats)
                 ),
                 "source_chats": self.settings.telegram_source_chats,
                 "balance_pct_override": None if self.settings.telegram_balance_pct is None else format(self.settings.telegram_balance_pct, "f"),
                 "leverage_override": self.settings.telegram_leverage,
-                "paper_source_chats": self.settings.telegram_paper_source_chats,
+                "paper_source_chats": [channel.telegram_ref for channel in self.demo_channel_store.list_enabled()],
                 "paper_balance_pct_override": None if self.settings.telegram_paper_balance_pct is None else format(self.settings.telegram_paper_balance_pct, "f"),
                 "paper_leverage_override": self.settings.telegram_paper_leverage,
             },
