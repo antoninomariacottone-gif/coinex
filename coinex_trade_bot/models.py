@@ -65,6 +65,9 @@ class ManagedTradeState:
     source_label: str | None = None
     leverage: int = 0
     balance_pct: str | None = None
+    starting_balance_quote: str | None = None
+    allocated_margin_quote: str | None = None
+    position_notional_quote: str | None = None
     entry_order_id: int | None = None
     position_size: str | None = None
     remaining_size: str | None = None
@@ -79,6 +82,8 @@ class ManagedTradeState:
     closed: bool = False
     realized_pnl_quote: str = "0"
     realized_r_multiple: str = "0"
+    realized_trade_return_pct: str = "0"
+    realized_portfolio_return_pct: str = "0"
     status: str = "created"
     created_at: int = 0
     updated_at: int = 0

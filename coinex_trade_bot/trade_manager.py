@@ -28,6 +28,14 @@ class TradeManager:
                 return Decimal(item["available"])
         raise ValueError(f"No futures balance found for {ccy}")
 
+    def _get_allocated_margin_quote(self, balance_pct: Decimal | None) -> tuple[Decimal | None, Decimal | None]:
+        effective_balance_pct = balance_pct if balance_pct is not None else self.settings.default_balance_pct
+        if effective_balance_pct is None:
+            return None, None
+        available_balance = self._get_available_balance(self.settings.futures_quote_ccy)
+        allocated_margin_quote = available_balance * (effective_balance_pct / Decimal("100"))
+        return available_balance, allocated_margin_quote
+
     def _touch(self, state: ManagedTradeState, note: str | None = None, status: str | None = None) -> None:
         state.updated_at = int(time.time() * 1000)
         if note:
@@ -51,15 +59,31 @@ class TradeManager:
     def prepare_paper_signal(self, signal: ParsedSignal) -> ParsedSignal:
         ticker = self.client.get_futures_ticker(signal.market)
         start_price = self._select_trigger_price(ticker)
+        remaining_targets = self._filter_paper_targets(signal.side, start_price, signal.targets)
+        stop_breached = start_price <= signal.stop_loss if signal.side == "long" else start_price >= signal.stop_loss
+        if stop_breached:
+            raise ValueError(
+                f"Paper signal skipped: current price {start_price} has already crossed the stop-loss {signal.stop_loss}."
+            )
+        if not remaining_targets:
+            raise ValueError(
+                f"Paper signal skipped: current price {start_price} is already beyond all targets for this {signal.side} setup."
+            )
         return ParsedSignal(
             market=signal.market,
             side=signal.side,
             entry_price=start_price,
-            targets=signal.targets,
+            targets=remaining_targets,
             stop_loss=signal.stop_loss,
             break_even_price=start_price,
+            entry_range=signal.entry_range,
             raw_text=signal.raw_text,
         )
+
+    def _filter_paper_targets(self, side: str, start_price: Decimal, targets: list[Decimal]) -> list[Decimal]:
+        if side == "long":
+            return [target for target in targets if target > start_price]
+        return [target for target in targets if target < start_price]
 
     def _split_take_profit_amounts(self, size: Decimal, split_count: int, base_precision: int) -> list[Decimal]:
         tp_amounts: list[Decimal] = []
@@ -251,6 +275,12 @@ class TradeManager:
         state.position_open = True
         state.exits_placed = True
         state.signal_entry_price = state.signal_entry_price or format(signal.entry_price, "f")
+        available_balance, allocated_margin_quote = self._get_allocated_margin_quote(balance_pct_override)
+        if available_balance is not None:
+            state.starting_balance_quote = format(available_balance, "f")
+        if allocated_margin_quote is not None:
+            state.allocated_margin_quote = format(allocated_margin_quote, "f")
+        state.position_notional_quote = format(signal.entry_price * plan.size, "f")
         self._touch(state, note=f"Paper trade opened at live price {signal.entry_price}", status="paper_open")
         return state
 
@@ -631,6 +661,12 @@ class TradeManager:
         total_risk = risk_per_unit * initial_size
         if total_risk > 0:
             state.realized_r_multiple = format(realized / total_risk, "f")
+        allocated_margin_quote = Decimal(state.allocated_margin_quote) if state.allocated_margin_quote else Decimal("0")
+        if allocated_margin_quote > 0:
+            state.realized_trade_return_pct = format((realized / allocated_margin_quote) * Decimal("100"), "f")
+        starting_balance_quote = Decimal(state.starting_balance_quote) if state.starting_balance_quote else Decimal("0")
+        if starting_balance_quote > 0:
+            state.realized_portfolio_return_pct = format((realized / starting_balance_quote) * Decimal("100"), "f")
 
     async def _reconcile_paper_price(
         self,

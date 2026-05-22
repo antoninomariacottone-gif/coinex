@@ -85,6 +85,8 @@ class BotService:
         closed_paper_trades = [trade for trade in paper_trades if trade.closed]
         realized_total = sum((Decimal(trade.realized_pnl_quote) for trade in paper_trades), Decimal("0"))
         realized_r_total = sum((Decimal(trade.realized_r_multiple) for trade in paper_trades), Decimal("0"))
+        realized_trade_return_total = sum((Decimal(trade.realized_trade_return_pct) for trade in paper_trades), Decimal("0"))
+        realized_portfolio_return_total = sum((Decimal(trade.realized_portfolio_return_pct) for trade in paper_trades), Decimal("0"))
         positive_closed = [trade for trade in closed_paper_trades if Decimal(trade.realized_pnl_quote) > 0]
         negative_closed = [trade for trade in closed_paper_trades if Decimal(trade.realized_pnl_quote) < 0]
         breakeven_closed = [trade for trade in closed_paper_trades if Decimal(trade.realized_pnl_quote) == 0]
@@ -106,12 +108,16 @@ class BotService:
                     "breakeven_count": 0,
                     "realized_pnl_quote": Decimal("0"),
                     "realized_r_total": Decimal("0"),
+                    "realized_trade_return_pct_total": Decimal("0"),
+                    "realized_portfolio_return_pct_total": Decimal("0"),
                 },
             )
             realized = Decimal(trade.realized_pnl_quote)
             source_bucket["trade_count"] += 1
             source_bucket["realized_pnl_quote"] += realized
             source_bucket["realized_r_total"] += Decimal(trade.realized_r_multiple)
+            source_bucket["realized_trade_return_pct_total"] += Decimal(trade.realized_trade_return_pct)
+            source_bucket["realized_portfolio_return_pct_total"] += Decimal(trade.realized_portfolio_return_pct)
             if trade.closed:
                 source_bucket["closed_count"] += 1
                 if realized > 0:
@@ -134,6 +140,8 @@ class BotService:
                 "win_rate_pct": format(win_rate_source.quantize(Decimal("0.01")), "f"),
                 "realized_pnl_quote": format(bucket["realized_pnl_quote"], "f"),
                 "realized_r_total": format(bucket["realized_r_total"], "f"),
+                "realized_trade_return_pct_total": format(bucket["realized_trade_return_pct_total"], "f"),
+                "realized_portfolio_return_pct_total": format(bucket["realized_portfolio_return_pct_total"], "f"),
             }
         return {
             "paper_trade_count": len(paper_trades),
@@ -145,6 +153,8 @@ class BotService:
             "paper_win_rate_pct": format(win_rate.quantize(Decimal("0.01")), "f"),
             "paper_realized_pnl_quote": format(realized_total, "f"),
             "paper_realized_r_total": format(realized_r_total, "f"),
+            "paper_realized_trade_return_pct_total": format(realized_trade_return_total, "f"),
+            "paper_realized_portfolio_return_pct_total": format(realized_portfolio_return_total, "f"),
             "by_source": by_source_serialized,
         }
 
@@ -161,6 +171,8 @@ class BotService:
                 "win_rate_pct": "0.00",
                 "realized_pnl_quote": "0",
                 "realized_r_total": "0",
+                "realized_trade_return_pct_total": "0",
+                "realized_portfolio_return_pct_total": "0",
             }
             views.append(
                 {

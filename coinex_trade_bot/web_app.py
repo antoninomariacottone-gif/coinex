@@ -232,6 +232,9 @@ Obiettivi:
             break_even_price: trade.break_even_price,
             leverage: trade.leverage,
             balance_pct: trade.balance_pct,
+            starting_balance_quote: trade.starting_balance_quote,
+            allocated_margin_quote: trade.allocated_margin_quote,
+            position_notional_quote: trade.position_notional_quote,
             position_size: trade.position_size,
             remaining_size: trade.remaining_size,
             targets,
@@ -241,6 +244,8 @@ Obiettivi:
             position_open: trade.position_open,
             realized_pnl_quote: trade.realized_pnl_quote,
             realized_r_multiple: trade.realized_r_multiple,
+            realized_trade_return_pct: trade.realized_trade_return_pct,
+            realized_portfolio_return_pct: trade.realized_portfolio_return_pct,
             source_label: trade.source_label
           }}, null, 2)}}</pre>
           <pre>${{notes || "Nessuna nota recente"}}</pre>
