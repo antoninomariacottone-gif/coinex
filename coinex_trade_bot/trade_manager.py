@@ -36,6 +36,31 @@ class TradeManager:
             state.status = status
         self.store.save(state)
 
+    def _select_trigger_price(self, item: dict) -> Decimal:
+        price_type = self.settings.trigger_price_type
+        if price_type == "mark_price":
+            candidate = item.get("mark_price") or item.get("last")
+        elif price_type == "index_price":
+            candidate = item.get("index_price") or item.get("last")
+        else:
+            candidate = item.get("last")
+        if candidate is None:
+            raise RuntimeError(f"Missing trigger price in market update for price type {price_type}")
+        return Decimal(str(candidate))
+
+    def prepare_paper_signal(self, signal: ParsedSignal) -> ParsedSignal:
+        ticker = self.client.get_futures_ticker(signal.market)
+        start_price = self._select_trigger_price(ticker)
+        return ParsedSignal(
+            market=signal.market,
+            side=signal.side,
+            entry_price=start_price,
+            targets=signal.targets,
+            stop_loss=signal.stop_loss,
+            break_even_price=start_price,
+            raw_text=signal.raw_text,
+        )
+
     def _split_take_profit_amounts(self, size: Decimal, split_count: int, base_precision: int) -> list[Decimal]:
         tp_amounts: list[Decimal] = []
         remaining = size
@@ -225,7 +250,8 @@ class TradeManager:
         state.tp_amounts = [format(amount, "f") for amount in plan.tp_amounts]
         state.position_open = True
         state.exits_placed = True
-        self._touch(state, note="Paper trade opened", status="paper_open")
+        state.signal_entry_price = state.signal_entry_price or format(signal.entry_price, "f")
+        self._touch(state, note=f"Paper trade opened at live price {signal.entry_price}", status="paper_open")
         return state
 
     async def resume_trade_from_state(self, state: ManagedTradeState) -> None:
@@ -364,6 +390,13 @@ class TradeManager:
                 state.tp1_done = True
                 self._touch(state, note="First take-profit filled", status="tp1_hit")
                 await self._move_stop_to_break_even(signal, state)
+                return
+
+        if not state.tp1_done and self._did_position_reduce_after_tp1(state, amount):
+            state.tp1_done = True
+            self._touch(state, note="First take-profit inferred from reduced position size", status="tp1_hit")
+            await self._move_stop_to_break_even(signal, state)
+            return
 
         current_stop_ids = [item["id"] for item in position.get("stop_loss_list", [])]
         if current_stop_ids and state.stop_loss_order_id is None:
@@ -620,14 +653,12 @@ class TradeManager:
         }
         await self._handle_paper_price_update([synthetic_state], signal, plan, state, market_info)
 
-    def _select_trigger_price(self, item: dict) -> Decimal:
-        price_type = self.settings.trigger_price_type
-        if price_type == "mark_price":
-            candidate = item.get("mark_price") or item.get("last")
-        elif price_type == "index_price":
-            candidate = item.get("index_price") or item.get("last")
-        else:
-            candidate = item.get("last")
-        if candidate is None:
-            raise RuntimeError(f"Missing trigger price in market update for price type {price_type}")
-        return Decimal(str(candidate))
+    def _did_position_reduce_after_tp1(self, state: ManagedTradeState, current_amount: Decimal) -> bool:
+        if not state.position_size or not state.tp_amounts:
+            return False
+        initial_amount = Decimal(state.position_size)
+        first_tp_amount = Decimal(state.tp_amounts[0])
+        if first_tp_amount <= 0 or current_amount <= 0:
+            return False
+        expected_after_tp1 = initial_amount - first_tp_amount
+        return current_amount <= expected_after_tp1 or current_amount < initial_amount

@@ -58,6 +58,7 @@ class ManagedTradeState:
     break_even_price: str
     targets: list[str]
     entry_order_type: str
+    signal_entry_price: str | None = None
     execution_mode: str = "live"
     source_label: str | None = None
     leverage: int = 0
@@ -99,6 +100,7 @@ class ManagedTradeState:
             market=signal.market,
             side=signal.side,
             entry_price=decimal_to_str(signal.entry_price),
+            signal_entry_price=decimal_to_str(signal.entry_price),
             stop_loss=decimal_to_str(signal.stop_loss),
             break_even_price=decimal_to_str(break_even_price),
             targets=[decimal_to_str(target) for target in signal.targets],

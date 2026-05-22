@@ -59,6 +59,48 @@ class BotService:
             if closed_paper_trades
             else Decimal("0")
         )
+        by_source: dict[str, dict[str, Any]] = {}
+        for trade in paper_trades:
+            source = trade.source_label or "manual"
+            source_bucket = by_source.setdefault(
+                source,
+                {
+                    "trade_count": 0,
+                    "closed_count": 0,
+                    "positive_count": 0,
+                    "negative_count": 0,
+                    "breakeven_count": 0,
+                    "realized_pnl_quote": Decimal("0"),
+                    "realized_r_total": Decimal("0"),
+                },
+            )
+            realized = Decimal(trade.realized_pnl_quote)
+            source_bucket["trade_count"] += 1
+            source_bucket["realized_pnl_quote"] += realized
+            source_bucket["realized_r_total"] += Decimal(trade.realized_r_multiple)
+            if trade.closed:
+                source_bucket["closed_count"] += 1
+                if realized > 0:
+                    source_bucket["positive_count"] += 1
+                elif realized < 0:
+                    source_bucket["negative_count"] += 1
+                else:
+                    source_bucket["breakeven_count"] += 1
+
+        by_source_serialized = {}
+        for source, bucket in by_source.items():
+            closed_count = bucket["closed_count"]
+            win_rate_source = (Decimal(bucket["positive_count"]) / Decimal(closed_count) * Decimal("100")) if closed_count else Decimal("0")
+            by_source_serialized[source] = {
+                "trade_count": bucket["trade_count"],
+                "closed_count": closed_count,
+                "positive_count": bucket["positive_count"],
+                "negative_count": bucket["negative_count"],
+                "breakeven_count": bucket["breakeven_count"],
+                "win_rate_pct": format(win_rate_source.quantize(Decimal("0.01")), "f"),
+                "realized_pnl_quote": format(bucket["realized_pnl_quote"], "f"),
+                "realized_r_total": format(bucket["realized_r_total"], "f"),
+            }
         return {
             "paper_trade_count": len(paper_trades),
             "paper_open_count": len([trade for trade in paper_trades if not trade.closed]),
@@ -69,6 +111,7 @@ class BotService:
             "paper_win_rate_pct": format(win_rate.quantize(Decimal("0.01")), "f"),
             "paper_realized_pnl_quote": format(realized_total, "f"),
             "paper_realized_r_total": format(realized_r_total, "f"),
+            "by_source": by_source_serialized,
         }
 
     async def get_dashboard_status(self) -> dict[str, Any]:
@@ -148,6 +191,9 @@ class BotService:
     ) -> dict[str, Any]:
         async with self._lock:
             signal = parse_signal(signal_text, break_even_override=self.settings.break_even_price_override)
+            original_entry_price = signal.entry_price
+            if execution_mode == "paper":
+                signal = self.trade_manager.prepare_paper_signal(signal)
             self._ensure_trade_slot_available(signal.market, signal.side, execution_mode=execution_mode)
             market_info = self.client.get_market_info(signal.market)
             plan = self.trade_manager.build_position_plan(signal, market_info, leverage=leverage, balance_pct=balance_pct)
@@ -166,6 +212,8 @@ class BotService:
                     balance_pct_override=balance_pct,
                     source_label=source_label,
                 )
+                state.signal_entry_price = format(original_entry_price, "f")
+                self.store.save(state)
             else:
                 state = await self.trade_manager.run_new_trade(
                     signal,
@@ -182,6 +230,7 @@ class BotService:
             summary["trade_id"] = state.trade_id
             summary["market_side_key"] = state.market_side_key
             summary["execution_mode"] = state.execution_mode
+            summary["signal_entry_price"] = None if state.signal_entry_price is None else state.signal_entry_price
             return summary
 
     async def test_connection(self) -> dict[str, Any]:

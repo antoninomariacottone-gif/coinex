@@ -70,7 +70,7 @@ async def healthz() -> dict[str, str]:
 async def dashboard(_: Annotated[str, Depends(require_auth)]) -> str:
     config_warning = ""
     if not settings.access_id or not settings.secret_key:
-        config_warning = "<div style='margin-bottom:12px;padding:12px 14px;border-radius:16px;background:#fff3cd;border:1px solid #f0d98a;'>Configurazione incompleta: aggiungi le chiavi CoinEx nelle variabili ambiente Railway prima di usare il bot live.</div>"
+        config_warning = "<div style='margin-bottom:12px;padding:12px 14px;border-radius:16px;background:#fff3cd;border:1px solid #f0d98a;'>Configurazione incompleta: aggiungi le chiavi CoinEx prima di usare il bot live.</div>"
     return f"""<!doctype html>
 <html lang="it">
 <head>
@@ -80,13 +80,14 @@ async def dashboard(_: Annotated[str, Depends(require_auth)]) -> str:
   <style>
     :root {{ color-scheme: light; --bg:#f2efe8; --panel:#fffaf2; --ink:#1e1c19; --accent:#0f766e; --danger:#b42318; --line:#d8d1c2; }}
     body {{ margin:0; font-family: Georgia, 'Times New Roman', serif; background: radial-gradient(circle at top, #fff9ef, var(--bg)); color:var(--ink); }}
-    .wrap {{ max-width: 980px; margin: 0 auto; padding: 32px 18px 60px; }}
+    .wrap {{ max-width: 1200px; margin: 0 auto; padding: 32px 18px 60px; }}
     .hero {{ display:grid; gap:12px; margin-bottom:24px; }}
     .hero h1 {{ margin:0; font-size: clamp(2rem, 5vw, 4rem); line-height: .95; }}
-    .hero p {{ margin:0; max-width: 680px; }}
-    .grid {{ display:grid; grid-template-columns: 1.4fr .9fr; gap:18px; }}
+    .hero p {{ margin:0; max-width: 760px; }}
+    .grid {{ display:grid; grid-template-columns: 1.2fr .8fr; gap:18px; }}
+    .stack {{ display:grid; gap:18px; }}
     .panel {{ background:var(--panel); border:1px solid var(--line); border-radius:24px; padding:18px; box-shadow:0 18px 40px rgba(0,0,0,.05); }}
-    textarea {{ width:100%; min-height:280px; resize:vertical; border-radius:16px; border:1px solid var(--line); padding:14px; font:inherit; background:white; }}
+    textarea {{ width:100%; min-height:240px; resize:vertical; border-radius:16px; border:1px solid var(--line); padding:14px; font:inherit; background:white; }}
     textarea::placeholder {{ color:#7f7667; opacity:1; }}
     button {{ border:0; border-radius:999px; padding:12px 18px; font:inherit; cursor:pointer; }}
     .primary {{ background:var(--accent); color:white; }}
@@ -95,24 +96,25 @@ async def dashboard(_: Annotated[str, Depends(require_auth)]) -> str:
     .actions {{ display:flex; gap:10px; flex-wrap:wrap; margin-top:12px; }}
     pre {{ white-space:pre-wrap; word-break:break-word; background:#fff; border:1px solid var(--line); padding:12px; border-radius:16px; }}
     #result {{ min-height: 160px; }}
-    @media (max-width: 840px) {{ .grid {{ grid-template-columns: 1fr; }} }}
+    @media (max-width: 960px) {{ .grid {{ grid-template-columns: 1fr; }} }}
   </style>
 </head>
 <body>
   <div class="wrap">
     <section class="hero">
       <h1>CoinEx Trade Bot</h1>
-      <p>Dashboard protetta per inviare segnali, vedere il saldo futures e lanciare un micro-trade reale di test su BTC.</p>
+      <p>Sezione separata per live trading e demo trading, con monitoraggio continuo di TP, SL e break-even dopo il primo target.</p>
     </section>
     <section class="grid">
-      <div class="panel">
-        {config_warning}
-        <h2>Nuovo segnale</h2>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px;">
-          <label>Leva<br><input id="leverage" type="number" min="1" step="1" value="{settings.leverage}" style="width:100%;padding:10px;border-radius:14px;border:1px solid var(--line);"></label>
-          <label>% saldo futures<br><input id="balancePct" type="number" min="0.1" max="100" step="0.1" value="{'' if settings.default_balance_pct is None else settings.default_balance_pct}" style="width:100%;padding:10px;border-radius:14px;border:1px solid var(--line);"></label>
-        </div>
-        <textarea id="signal" placeholder="🔴 TON – SHORT
+      <div class="stack">
+        <div class="panel">
+          {config_warning}
+          <h2>Live Trading</h2>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px;">
+            <label>Leva live<br><input id="leverage" type="number" min="1" step="1" value="{settings.leverage}" style="width:100%;padding:10px;border-radius:14px;border:1px solid var(--line);"></label>
+            <label>% saldo live<br><input id="balancePct" type="number" min="0.1" max="100" step="0.1" value="{'' if settings.default_balance_pct is None else settings.default_balance_pct}" style="width:100%;padding:10px;border-radius:14px;border:1px solid var(--line);"></label>
+          </div>
+          <textarea id="signal" placeholder="🔴 TON – SHORT
 ➡️ Punto di ingresso: 1.8002
 Obiettivi:
 1.7816
@@ -121,11 +123,33 @@ Obiettivi:
 1.6086
 ❌ Stop Loss: 1.8909
 ✅ Dopo il primo take profit, spostiamo lo stop loss sul punto di ingresso."></textarea>
-        <div class="actions">
-          <button class="primary" onclick="submitSignal()">Avvia trade</button>
-          <button class="ghost" onclick="refreshStatus()">Aggiorna saldo</button>
-          <button class="ghost" onclick="testConnection()">Test collegamento</button>
-          <button class="danger" onclick="testTrade()">Test BTC reale</button>
+          <div class="actions">
+            <button class="primary" onclick="submitSignal()">Avvia trade live</button>
+            <button class="ghost" onclick="refreshStatus()">Aggiorna saldo</button>
+            <button class="ghost" onclick="testConnection()">Test collegamento</button>
+            <button class="danger" onclick="testTrade()">Test BTC reale</button>
+          </div>
+        </div>
+        <div class="panel">
+          <h2>Demo Trading</h2>
+          <p style="margin-top:0;">La demo usa il prezzo reale della cripto al momento della partenza, monitora il prezzo in tempo reale fino a TP o SL e sposta il break-even dopo TP1.</p>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px;">
+            <label>Leva demo<br><input id="demoLeverage" type="number" min="1" step="1" value="{settings.telegram_paper_leverage or settings.leverage}" style="width:100%;padding:10px;border-radius:14px;border:1px solid var(--line);"></label>
+            <label>% saldo demo<br><input id="demoBalancePct" type="number" min="0.1" max="100" step="0.1" value="{'' if settings.telegram_paper_balance_pct is None else settings.telegram_paper_balance_pct}" style="width:100%;padding:10px;border-radius:14px;border:1px solid var(--line);"></label>
+          </div>
+          <textarea id="demoSignal" placeholder="🔴 SHORT - $ETHW
+
+- Entry market: 0.2791
+- Entry limit: 0.2899
+- SL: 0.2990
+
+🎯 TP1: 0.2436
+🎯 TP2: 0.2118
+🎯 TP3: 0.1591"></textarea>
+          <div class="actions">
+            <button class="primary" onclick="submitDemoSignal()">Avvia demo</button>
+          </div>
+          <pre id="demoChannelsBlock">Canali demo configurati: caricamento...</pre>
         </div>
       </div>
       <div class="panel">
@@ -135,7 +159,7 @@ Obiettivi:
         <pre id="statusBlock">Caricamento...</pre>
         <h2>Saldo futures</h2>
         <pre id="balanceBlock">Caricamento...</pre>
-        <h2>Statistiche paper</h2>
+        <h2>Statistiche demo</h2>
         <pre id="paperStatsBlock">Caricamento...</pre>
         <h2>Telegram</h2>
         <pre id="telegramBlock">Caricamento...</pre>
@@ -151,7 +175,7 @@ Obiettivi:
 
     function renderTradeCard(trade) {{
       const targets = Array.isArray(trade.targets) ? trade.targets.join(", ") : "";
-      const notes = Array.isArray(trade.notes) ? trade.notes.slice(-3).join("\\n") : "";
+      const notes = Array.isArray(trade.notes) ? trade.notes.slice(-4).join("\\n") : "";
       return `
         <div style="background:#fff;border:1px solid var(--line);border-radius:18px;padding:12px;margin-bottom:12px;">
           <div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start;">
@@ -163,6 +187,7 @@ Obiettivi:
           </div>
           <pre style="margin-top:10px;">${{JSON.stringify({{
             entry_price: trade.entry_price,
+            signal_entry_price: trade.signal_entry_price,
             stop_loss: trade.stop_loss,
             break_even_price: trade.break_even_price,
             leverage: trade.leverage,
@@ -223,7 +248,8 @@ Obiettivi:
         configured: data.configured,
         dry_run: data.dry_run,
         test_trade_enabled: data.test_trade_enabled,
-        active_trade_count: (data.active_trades || []).length
+        active_trade_count: (data.active_trades || []).length,
+        paper_trade_count: data.paper_stats ? data.paper_stats.paper_trade_count : 0
       }}, null, 2);
       const activeTrades = data.active_trades || [];
       document.getElementById("activeTradesBlock").innerHTML = activeTrades.length
@@ -239,12 +265,17 @@ Obiettivi:
       if (data.paper_stats) {{
         document.getElementById("paperStatsBlock").textContent = JSON.stringify(data.paper_stats, null, 2);
       }} else {{
-        document.getElementById("paperStatsBlock").textContent = "Nessuna statistica paper disponibile";
+        document.getElementById("paperStatsBlock").textContent = "Nessuna statistica demo disponibile";
       }}
       if (data.telegram) {{
         document.getElementById("telegramBlock").textContent = JSON.stringify(data.telegram, null, 2);
+        const paperChannels = data.telegram.paper_source_chats || [];
+        document.getElementById("demoChannelsBlock").textContent = paperChannels.length
+          ? "Canali demo configurati: " + paperChannels.join(", ")
+          : "Nessun canale demo configurato";
       }} else {{
         document.getElementById("telegramBlock").textContent = "Telegram non configurato";
+        document.getElementById("demoChannelsBlock").textContent = "Nessun canale demo configurato";
       }}
       return data;
     }}
@@ -257,21 +288,37 @@ Obiettivi:
         leverage: leverageValue ? Number(leverageValue) : null,
         balance_pct: balancePctValue ? Number(balancePctValue) : null
       }});
+      await refreshStatus();
     }}
+
+    async function submitDemoSignal() {{
+      const leverageValue = document.getElementById("demoLeverage").value;
+      const balancePctValue = document.getElementById("demoBalancePct").value;
+      await callApi("/api/demo-signal", {{
+        signal_text: document.getElementById("demoSignal").value,
+        leverage: leverageValue ? Number(leverageValue) : null,
+        balance_pct: balancePctValue ? Number(balancePctValue) : null
+      }});
+      await refreshStatus();
+    }}
+
     async function testConnection() {{
       await callApi("/api/test-connection", {{}});
       await refreshStatus();
     }}
+
     async function testTrade() {{
       if (!confirm("Il test BTC apre una posizione reale per pochi secondi e paga fee. Continuare?")) return;
       await callApi("/api/test-trade", {{}});
       await refreshStatus();
     }}
+
     async function closeTrade(tradeId) {{
       if (!confirm("Vuoi chiudere questo trade e cancellare i suoi TP/SL?")) return;
       await callApi("/api/close-trade", {{ trade_id: tradeId }});
       await refreshStatus();
     }}
+
     refreshStatus().catch((error) => {{
       document.getElementById("balanceBlock").textContent = error.message;
     }});
@@ -297,6 +344,23 @@ async def api_signal(payload: SignalRequest, _: Annotated[str, Depends(require_a
         return {"ok": True, "summary": summary}
     except Exception as exc:  # noqa: BLE001
         LOGGER.exception("Signal submission failed")
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/api/demo-signal")
+async def api_demo_signal(payload: SignalRequest, _: Annotated[str, Depends(require_auth)]) -> dict:
+    try:
+        balance_pct = None if payload.balance_pct is None else Decimal(str(payload.balance_pct))
+        summary = await service.submit_signal(
+            payload.signal_text,
+            leverage=payload.leverage,
+            balance_pct=balance_pct,
+            execution_mode="paper",
+            source_label="manual-demo",
+        )
+        return {"ok": True, "summary": summary}
+    except Exception as exc:  # noqa: BLE001
+        LOGGER.exception("Demo signal submission failed")
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
