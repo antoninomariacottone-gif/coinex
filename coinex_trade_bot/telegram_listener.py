@@ -31,7 +31,6 @@ class TelegramSignalListener:
             and self.settings.telegram_api_id is not None
             and bool(self.settings.telegram_api_hash)
             and bool(self.settings.telegram_session_string)
-            and bool(self.settings.telegram_source_chats or self.bot_service.list_enabled_demo_channels() or self.settings.telegram_paper_source_chats)
         )
 
     async def start(self) -> None:
@@ -105,13 +104,29 @@ class TelegramSignalListener:
 
         @self.client.on(events.NewMessage())
         async def _handle_any_message(event) -> None:  # noqa: ANN001
-            chat_username = getattr(event.chat, "username", None)
-            chat_title = getattr(event.chat, "title", None)
+            chat = event.chat
+            if chat is None:
+                try:
+                    chat = await event.get_chat()
+                except Exception:  # noqa: BLE001
+                    chat = None
+
+            chat_username = getattr(chat, "username", None)
+            chat_title = getattr(chat, "title", None)
             chat_id = str(event.chat_id)
             live_refs = {value.lower() for value in self.settings.telegram_source_chats}
             demo_channels = self.bot_service.list_enabled_demo_channels()
 
             if chat_username and f"@{chat_username}".lower() in live_refs:
+                await _process_event(
+                    event,
+                    execution_mode="live",
+                    leverage=self.settings.telegram_leverage,
+                    balance_pct=self.settings.telegram_balance_pct,
+                )
+                return
+
+            if chat_id.lower() in live_refs or str(chat_title or "").lower() in live_refs:
                 await _process_event(
                     event,
                     execution_mode="live",
