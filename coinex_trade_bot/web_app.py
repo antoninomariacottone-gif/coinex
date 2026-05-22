@@ -256,7 +256,10 @@ Obiettivi:
               <strong>${{channel.name}}</strong><br>
               <small>${{channel.telegram_ref}} | ${{channel.enabled ? 'attivo' : 'pausato'}}</small>
             </div>
-            <a class="btn ghost" href="/demo/channels/${{channel.channel_id}}">Apri pagina</a>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;">
+              <a class="btn ghost" href="/demo/channels/${{channel.channel_id}}">Apri pagina</a>
+              <button class="danger" onclick="deleteDemoChannel('${{channel.channel_id}}')">Rimuovi</button>
+            </div>
           </div>
           <pre style="margin-top:10px;">${{JSON.stringify({{
             balance_pct: channel.balance_pct,
@@ -345,6 +348,12 @@ Obiettivi:
       await refreshStatus();
     }}
 
+    async function deleteDemoChannel(channelId) {{
+      if (!confirm("Vuoi rimuovere questo canale demo?")) return;
+      await callApi(`/api/demo-channels/${{channelId}}`, "DELETE");
+      await refreshStatus();
+    }}
+
     async function testConnection() {{
       await callApi("/api/test-connection", "POST", {{}});
       await refreshStatus();
@@ -404,6 +413,7 @@ def _demo_channel_page_html(channel_data: dict) -> str:
       </div>
       <div style="margin-top:12px;">
         <button onclick="saveChannel()">Salva</button>
+        <button onclick="deleteChannel()" style="margin-left:8px;background:#b42318;">Rimuovi canale</button>
       </div>
     </div>
     <div class="panel">
@@ -432,6 +442,19 @@ def _demo_channel_page_html(channel_data: dict) -> str:
         return;
       }}
       location.reload();
+    }}
+
+    async function deleteChannel() {{
+      if (!confirm("Vuoi rimuovere questo canale demo?")) return;
+      const response = await fetch("/api/demo-channels/{channel.channel_id}", {{
+        method: "DELETE"
+      }});
+      if (!response.ok) {{
+        const data = await response.text();
+        alert(data);
+        return;
+      }}
+      window.location.href = "/";
     }}
   </script>
 </body>
