@@ -11,9 +11,10 @@ from fastapi.responses import HTMLResponse
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from pydantic import BaseModel
 
+from coinex_trade_bot.activity_log import ActivityLog
 from coinex_trade_bot.coinex_client import CoinExClient
 from coinex_trade_bot.config import Settings, load_settings
-from coinex_trade_bot.activity_log import ActivityLog
+from coinex_trade_bot.db import Database
 from coinex_trade_bot.demo_channel_store import DemoChannelStore
 from coinex_trade_bot.service import BotService
 from coinex_trade_bot.state_store import StateStore
@@ -29,12 +30,13 @@ LOGGER = logging.getLogger("coinex_trade_bot.web")
 
 
 def build_service() -> BotService:
+    database = Database(settings.database_url)
     return BotService(
         settings,
         CoinExClient(settings),
-        StateStore(settings.state_file),
-        DemoChannelStore(settings.demo_channels_file),
-        ActivityLog(settings.activity_log_file),
+        StateStore(database),
+        DemoChannelStore(database),
+        ActivityLog(database),
     )
 
 

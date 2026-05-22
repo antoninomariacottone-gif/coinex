@@ -1,49 +1,48 @@
 from __future__ import annotations
 
-import json
 import time
 from dataclasses import asdict
-from pathlib import Path
 from uuid import uuid4
 
+from coinex_trade_bot.db import Database, DemoChannelRow
 from coinex_trade_bot.models import DemoChannelConfig
 
 
 class DemoChannelStore:
-    def __init__(self, path: Path):
-        self.path = path
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-
-    def _read_all(self) -> dict:
-        if not self.path.exists():
-            return {"channels": []}
-        data = json.loads(self.path.read_text(encoding="utf-8"))
-        if isinstance(data, dict) and "channels" in data:
-            return data
-        if isinstance(data, list):
-            return {"channels": data}
-        return {"channels": []}
-
-    def _write_all(self, payload: dict) -> None:
-        self.path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    def __init__(self, database: Database):
+        self.database = database
 
     def list_all(self) -> list[DemoChannelConfig]:
-        return [DemoChannelConfig(**item) for item in self._read_all()["channels"]]
+        with self.database.session() as session:
+            rows = session.query(DemoChannelRow).all()
+            return [DemoChannelConfig(**self.database.loads(row.payload_json)) for row in rows]
 
     def list_enabled(self) -> list[DemoChannelConfig]:
         return [item for item in self.list_all() if item.enabled]
 
     def load(self, channel_id: str) -> DemoChannelConfig | None:
-        for channel in self.list_all():
-            if channel.channel_id == channel_id:
-                return channel
-        return None
+        with self.database.session() as session:
+            row = session.get(DemoChannelRow, channel_id)
+            return None if row is None else DemoChannelConfig(**self.database.loads(row.payload_json))
 
     def save(self, channel: DemoChannelConfig) -> DemoChannelConfig:
-        payload = self._read_all()
-        channels = [item for item in payload["channels"] if item.get("channel_id") != channel.channel_id]
-        channels.append(asdict(channel))
-        self._write_all({"channels": channels})
+        payload = asdict(channel)
+        with self.database.session() as session:
+            row = session.get(DemoChannelRow, channel.channel_id)
+            if row is None:
+                row = DemoChannelRow(
+                    channel_id=channel.channel_id,
+                    payload_json=self.database.dumps(payload),
+                    enabled=channel.enabled,
+                    telegram_ref=channel.telegram_ref,
+                    name=channel.name,
+                )
+                session.add(row)
+            else:
+                row.payload_json = self.database.dumps(payload)
+                row.enabled = channel.enabled
+                row.telegram_ref = channel.telegram_ref
+                row.name = channel.name
         return channel
 
     def create(self, name: str, telegram_ref: str, balance_pct: str, leverage: int, enabled: bool = True) -> DemoChannelConfig:
@@ -87,7 +86,7 @@ class DemoChannelStore:
         return self.save(channel)
 
     def delete(self, channel_id: str) -> None:
-        payload = self._read_all()
-        channels = [item for item in payload["channels"] if item.get("channel_id") != channel_id]
-        self._write_all({"channels": channels})
-
+        with self.database.session() as session:
+            row = session.get(DemoChannelRow, channel_id)
+            if row is not None:
+                session.delete(row)

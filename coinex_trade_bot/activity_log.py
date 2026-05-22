@@ -1,37 +1,30 @@
 from __future__ import annotations
 
-import json
 import time
-from pathlib import Path
 
+from coinex_trade_bot.db import ActivityRow, Database
 
 class ActivityLog:
-    def __init__(self, path: Path, max_entries: int = 200):
-        self.path = path
-        self.path.parent.mkdir(parents=True, exist_ok=True)
+    def __init__(self, database: Database, max_entries: int = 200):
+        self.database = database
         self.max_entries = max_entries
 
-    def _read_all(self) -> list[dict]:
-        if not self.path.exists():
-            return []
-        data = json.loads(self.path.read_text(encoding="utf-8"))
-        return data if isinstance(data, list) else []
-
-    def _write_all(self, payload: list[dict]) -> None:
-        self.path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
-
     def append(self, kind: str, message: str, **extra) -> None:
-        rows = self._read_all()
-        rows.append(
-            {
-                "ts": int(time.time() * 1000),
-                "kind": kind,
-                "message": message,
-                **extra,
-            }
-        )
-        self._write_all(rows[-self.max_entries :])
+        payload = {
+            "ts": int(time.time() * 1000),
+            "kind": kind,
+            "message": message,
+            **extra,
+        }
+        with self.database.session() as session:
+            session.add(ActivityRow(ts=payload["ts"], kind=kind, payload_json=self.database.dumps(payload)))
+            all_ids = list(session.query(ActivityRow.id).order_by(ActivityRow.id.desc()).scalars())
+            for stale_id in all_ids[self.max_entries :]:
+                stale = session.get(ActivityRow, stale_id)
+                if stale is not None:
+                    session.delete(stale)
 
     def latest(self, limit: int = 50) -> list[dict]:
-        return list(reversed(self._read_all()[-limit:]))
-
+        with self.database.session() as session:
+            rows = session.query(ActivityRow).order_by(ActivityRow.id.desc()).limit(limit).all()
+            return [self.database.loads(row.payload_json) for row in rows]

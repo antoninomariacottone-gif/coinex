@@ -1,46 +1,45 @@
 from __future__ import annotations
 
-import json
 from dataclasses import asdict
-from pathlib import Path
 
+from coinex_trade_bot.db import Database, TradeRow
 from coinex_trade_bot.models import ManagedTradeState
 
 
 class StateStore:
-    def __init__(self, path: Path):
-        self.path = path
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-
-    def _read_all(self) -> dict:
-        if not self.path.exists():
-            return {"trades": []}
-        data = json.loads(self.path.read_text(encoding="utf-8"))
-        if isinstance(data, dict) and "trades" in data:
-            return data
-        if isinstance(data, dict):
-            return {"trades": [data]}
-        if isinstance(data, list):
-            return {"trades": data}
-        return {"trades": []}
-
-    def _write_all(self, payload: dict) -> None:
-        self.path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    def __init__(self, database: Database):
+        self.database = database
 
     def save(self, state: ManagedTradeState) -> None:
-        data = self._read_all()
-        trades = [item for item in data["trades"] if item.get("trade_id") != state.trade_id]
-        trades.append(asdict(state))
-        self._write_all({"trades": trades})
+        payload = asdict(state)
+        with self.database.session() as session:
+            row = session.get(TradeRow, state.trade_id)
+            if row is None:
+                row = TradeRow(
+                    trade_id=state.trade_id,
+                    payload_json=self.database.dumps(payload),
+                    closed=state.closed,
+                    market=state.market,
+                    side=state.side,
+                    execution_mode=state.execution_mode,
+                )
+                session.add(row)
+            else:
+                row.payload_json = self.database.dumps(payload)
+                row.closed = state.closed
+                row.market = state.market
+                row.side = state.side
+                row.execution_mode = state.execution_mode
 
     def load(self, trade_id: str) -> ManagedTradeState | None:
-        for item in self._read_all()["trades"]:
-            if item.get("trade_id") == trade_id:
-                return ManagedTradeState(**item)
-        return None
+        with self.database.session() as session:
+            row = session.get(TradeRow, trade_id)
+            return None if row is None else ManagedTradeState(**self.database.loads(row.payload_json))
 
     def load_all(self) -> list[ManagedTradeState]:
-        return [ManagedTradeState(**item) for item in self._read_all()["trades"]]
+        with self.database.session() as session:
+            rows = session.query(TradeRow).all()
+            return [ManagedTradeState(**self.database.loads(row.payload_json)) for row in rows]
 
     def load_active(self) -> list[ManagedTradeState]:
         return [trade for trade in self.load_all() if not trade.closed]
@@ -52,10 +51,11 @@ class StateStore:
         return None
 
     def delete(self, trade_id: str) -> None:
-        data = self._read_all()
-        trades = [item for item in data["trades"] if item.get("trade_id") != trade_id]
-        self._write_all({"trades": trades})
+        with self.database.session() as session:
+            row = session.get(TradeRow, trade_id)
+            if row is not None:
+                session.delete(row)
 
     def clear(self) -> None:
-        if self.path.exists():
-            self.path.unlink()
+        with self.database.session() as session:
+            session.query(TradeRow).delete()

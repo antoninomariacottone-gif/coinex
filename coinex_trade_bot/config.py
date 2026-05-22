@@ -51,6 +51,7 @@ class Settings:
     state_file: Path
     demo_channels_file: Path
     activity_log_file: Path
+    database_url: str
     log_level: str
     dashboard_username: str
     dashboard_password: str
@@ -107,6 +108,8 @@ def load_settings(allow_missing_secrets: bool = False) -> Settings:
     state_file = Path(os.getenv("STATE_FILE", r"runtime\active_trade.json"))
     demo_channels_file = Path(os.getenv("DEMO_CHANNELS_FILE", r"runtime\demo_channels.json"))
     activity_log_file = Path(os.getenv("ACTIVITY_LOG_FILE", r"runtime\activity_log.json"))
+    default_db_path = Path(os.getenv("DATABASE_SQLITE_PATH", r"runtime\coinex_bot.db"))
+    database_url = os.getenv("DATABASE_URL", f"sqlite:///{default_db_path.as_posix()}").strip()
     telegram_enabled = os.getenv("TELEGRAM_ENABLED", "false").strip().lower() == "true"
     telegram_api_id_raw = os.getenv("TELEGRAM_API_ID", "").strip()
     telegram_api_hash = os.getenv("TELEGRAM_API_HASH", "").strip()
@@ -130,6 +133,7 @@ def load_settings(allow_missing_secrets: bool = False) -> Settings:
         state_file=state_file,
         demo_channels_file=demo_channels_file,
         activity_log_file=activity_log_file,
+        database_url=database_url,
         log_level=os.getenv("LOG_LEVEL", "INFO").strip().upper(),
         dashboard_username=os.getenv("BOT_DASHBOARD_USERNAME", "admin").strip(),
         dashboard_password=_require("BOT_DASHBOARD_PASSWORD"),
