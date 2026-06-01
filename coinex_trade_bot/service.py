@@ -207,6 +207,7 @@ class BotService:
             "state": None if not active_trades else active_trades[0].__dict__,
             "active_trades": [trade.__dict__ for trade in active_trades],
             "configured": configured,
+            "database": self.store.database.status(),
             "dry_run": self.settings.dry_run,
             "test_trade_enabled": self.settings.test_trade_enabled,
             "test_market": self.settings.test_market,
