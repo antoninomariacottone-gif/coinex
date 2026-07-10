@@ -410,8 +410,18 @@ class TradeManager:
             state.position_open = True
             self._touch(state, note=f"Position opened with size {amount}", status="position_open")
 
+        if amount == 0:
+            if state.position_open:
+                state.closed = True
+                self._touch(state, note="Position closed", status="closed")
+                await self._cleanup_after_close(signal.market)
+            return
+
         if amount > 0 and not state.exits_placed:
             await self._place_exit_orders(signal, amount, state, market_info)
+            return
+
+        self._sync_exit_ids_from_position(position, state)
 
         current_tp_ids = {item["id"] for item in position.get("take_profit_list", [])}
         if state.take_profit_order_ids and not state.tp1_done:
@@ -427,16 +437,6 @@ class TradeManager:
             self._touch(state, note="First take-profit inferred from reduced position size", status="tp1_hit")
             await self._move_stop_to_break_even(signal, state)
             return
-
-        current_stop_ids = [item["id"] for item in position.get("stop_loss_list", [])]
-        if current_stop_ids and state.stop_loss_order_id is None:
-            state.stop_loss_order_id = current_stop_ids[0]
-            self._touch(state)
-
-        if amount == 0 and state.position_open:
-            state.closed = True
-            self._touch(state, note="Position closed", status="closed")
-            await self._cleanup_after_close(signal.market)
 
     async def _handle_user_deal(self, deal: dict, signal: ParsedSignal, state: ManagedTradeState) -> None:
         if deal.get("market") != signal.market:
@@ -495,13 +495,30 @@ class TradeManager:
     async def _move_stop_to_break_even(self, signal: ParsedSignal, state: ManagedTradeState) -> None:
         if state.break_even_moved:
             return
-        if state.stop_loss_order_id is None:
-            raise RuntimeError("Cannot move stop to break even: stop_loss_order_id is missing")
 
         break_even = Decimal(state.break_even_price)
-        self.client.modify_position_stop_loss(signal.market, state.stop_loss_order_id, break_even)
+        try:
+            if state.stop_loss_order_id is None:
+                raise RuntimeError("stop_loss_order_id is missing")
+            response = self.client.modify_position_stop_loss(signal.market, state.stop_loss_order_id, break_even)
+            self._sync_exit_ids_from_position(response, state)
+        except Exception as exc:  # noqa: BLE001
+            LOGGER.warning("Stop-loss modify failed for %s, setting a new full-position stop: %s", state.trade_id, exc)
+            response = self.client.set_position_stop_loss(signal.market, break_even)
+            self._sync_exit_ids_from_position(response, state)
+
         state.break_even_moved = True
         self._touch(state, note=f"Stop moved to break-even at {break_even}", status="break_even")
+
+    def _sync_exit_ids_from_position(self, position: dict, state: ManagedTradeState) -> None:
+        stop_items = position.get("stop_loss_list", []) or []
+        if stop_items:
+            full_stop = next((item for item in stop_items if item.get("is_all")), stop_items[0])
+            state.stop_loss_order_id = full_stop.get("id")
+
+        tp_items = position.get("take_profit_list", []) or []
+        if tp_items and not state.take_profit_order_ids:
+            state.take_profit_order_ids = [item["id"] for item in tp_items if "id" in item]
 
     async def _cleanup_after_close(self, market: str) -> None:
         try:
