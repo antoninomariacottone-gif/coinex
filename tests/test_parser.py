@@ -87,6 +87,24 @@ def test_parse_inline_target_signal():
     assert signal.stop_loss == Decimal("0.03350")
 
 
+def test_parse_italian_bearish_text_signal_without_explicit_short():
+    signal = parse_signal(
+        """#HYPE
+
+L'asset sta formando un pattern ribassista sotto la zona di resistenza, prevedo di vedere un'uscita al ribasso.
+
+✅ Prezzo di entrata: 67.667
+📈Obiettivi: 67.010, 64.350, 60.879
+🔽 Stop loss: 71.063"""
+    )
+
+    assert signal.market == "HYPEUSDT"
+    assert signal.side == "short"
+    assert signal.entry_price == Decimal("67.667")
+    assert signal.targets == [Decimal("67.010"), Decimal("64.350"), Decimal("60.879")]
+    assert signal.stop_loss == Decimal("71.063")
+
+
 def test_detect_trade_signal_and_ignore_noise():
     assert looks_like_trade_signal("UNI + 3.5R") is False
     assert looks_like_trade_signal("Preso il primo obiettivo") is False
@@ -100,6 +118,16 @@ Obiettivi:
 0.4267
 0.4517
 ❌ Stop Loss: 0.3868"""
+        )
+        is True
+    )
+    assert (
+        looks_like_trade_signal(
+            """#HYPE
+L'asset sta formando un pattern ribassista sotto la zona di resistenza.
+✅ Prezzo di entrata: 67.667
+📈Obiettivi: 67.010, 64.350, 60.879
+🔽 Stop loss: 71.063"""
         )
         is True
     )

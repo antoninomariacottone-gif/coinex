@@ -62,10 +62,30 @@ def _extract_market(text: str) -> str:
 
 
 def _extract_side(text: str) -> str:
-    match = re.search(r"\b(LONG|SHORT|BUY|SELL)\b", text.upper())
-    if not match:
-        raise ValueError("Unable to parse side (LONG/SHORT) from signal text")
-    return SIDE_ALIASES[match.group(1).lower()]
+    upper = text.upper()
+    match = re.search(r"\b(LONG|SHORT|BUY|SELL)\b", upper)
+    if match:
+        return SIDE_ALIASES[match.group(1).lower()]
+    if any(token in upper for token in ("RIBASSISTA", "RIBASSO", "BEARISH")):
+        return "short"
+    if any(token in upper for token in ("RIALZISTA", "RIALZO", "BULLISH")):
+        return "long"
+    raise ValueError("Unable to parse side (LONG/SHORT) from signal text")
+
+
+def _infer_side_from_prices(entry_price: Decimal, targets: list[Decimal], stop_loss: Decimal) -> str:
+    if targets and max(targets) < entry_price and stop_loss > entry_price:
+        return "short"
+    if targets and min(targets) > entry_price and stop_loss < entry_price:
+        return "long"
+    raise ValueError("Unable to infer side from entry, targets, and stop loss")
+
+
+def _extract_side_or_infer(text: str, entry_price: Decimal, targets: list[Decimal], stop_loss: Decimal) -> str:
+    try:
+        return _extract_side(text)
+    except ValueError:
+        return _infer_side_from_prices(entry_price, targets, stop_loss)
 
 
 def _extract_entry_info(text: str) -> tuple[Decimal, list[Decimal]]:
@@ -83,6 +103,8 @@ def _extract_entry_info(text: str) -> tuple[Decimal, list[Decimal]]:
         r"LIMIT\s+ENTRY\s*[:\-]*\s*([0-9]+(?:[.,][0-9]+)?)",
         r"ENTRY\s*[:-]\s*([0-9]+(?:[.,][0-9]+)?)",
         r"PUNTO DI INGRESSO\s*:\s*([0-9]+(?:[.,][0-9]+)?)",
+        r"PREZZO DI ENTRATA\s*:\s*([0-9]+(?:[.,][0-9]+)?)",
+        r"PREZZO D['’]ENTRATA\s*:\s*([0-9]+(?:[.,][0-9]+)?)",
         r"INGRESSO\s*:\s*([0-9]+(?:[.,][0-9]+)?)",
     ]
     for pattern in patterns:
@@ -174,10 +196,10 @@ def _extract_targets(text: str) -> list[Decimal]:
 
 def parse_signal(text: str, break_even_override: Decimal | None = None) -> ParsedSignal:
     market = _extract_market(text)
-    side = _extract_side(text)
     entry_price, entry_range = _extract_entry_info(text)
     stop_loss = _extract_stop_loss(text)
     targets = _extract_targets(text)
+    side = _extract_side_or_infer(text, entry_price, targets, stop_loss)
     break_even_price = break_even_override or entry_price
 
     return ParsedSignal(
@@ -195,8 +217,9 @@ def parse_signal(text: str, break_even_override: Decimal | None = None) -> Parse
 def looks_like_trade_signal(text: str) -> bool:
     upper = text.upper()
     required_fragments = [
-        any(token in upper for token in ("LONG", "SHORT", "BUY", "SELL")),
-        any(token in upper for token in ("PUNTO DI INGRESSO", "ENTRY", "INGRESSO")),
+        any(token in upper for token in ("LONG", "SHORT", "BUY", "SELL", "RIBASSISTA", "RIBASSO", "BEARISH", "RIALZISTA", "RIALZO", "BULLISH"))
+        or bool(re.search(r"#?[A-Z0-9]{2,}", upper)),
+        any(token in upper for token in ("PUNTO DI INGRESSO", "PREZZO DI ENTRATA", "PREZZO D'ENTRATA", "ENTRY", "INGRESSO")),
         any(token in upper for token in ("OBIETTIVI", "TARGET", "TP1", "PROFIT TARGETS")),
         any(token in upper for token in ("STOP LOSS", "SL", "STOP")),
     ]
