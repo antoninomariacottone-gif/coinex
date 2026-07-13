@@ -284,6 +284,8 @@ class BotService:
             try:
                 if execution_mode == "paper":
                     signal = self.trade_manager.prepare_paper_signal(signal)
+                elif self.settings.entry_order_type == "market":
+                    signal = self.trade_manager.prepare_market_signal(signal, label="Live market")
                 self._ensure_trade_slot_available(signal.market, signal.side, execution_mode=execution_mode)
                 market_info = self.client.get_market_info(signal.market)
                 plan = self.trade_manager.build_position_plan(signal, market_info, leverage=leverage, balance_pct=balance_pct)
@@ -311,6 +313,8 @@ class BotService:
                         balance_pct_override=balance_pct,
                         source_label=source_label,
                     )
+                    state.signal_entry_price = format(original_entry_price, "f")
+                    self.store.save(state)
 
                 if not state.closed and state.status != "dry_run":
                     self._register_trade_task(

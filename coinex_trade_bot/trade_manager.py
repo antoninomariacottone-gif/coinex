@@ -56,18 +56,18 @@ class TradeManager:
             raise RuntimeError(f"Missing trigger price in market update for price type {price_type}")
         return Decimal(str(candidate))
 
-    def prepare_paper_signal(self, signal: ParsedSignal) -> ParsedSignal:
+    def prepare_market_signal(self, signal: ParsedSignal, label: str = "Market") -> ParsedSignal:
         ticker = self.client.get_futures_ticker(signal.market)
         start_price = self._select_trigger_price(ticker)
         remaining_targets = self._filter_paper_targets(signal.side, start_price, signal.targets)
         stop_breached = start_price <= signal.stop_loss if signal.side == "long" else start_price >= signal.stop_loss
         if stop_breached:
             raise ValueError(
-                f"Paper signal skipped: current price {start_price} has already crossed the stop-loss {signal.stop_loss}."
+                f"{label} signal skipped: current price {start_price} has already crossed the stop-loss {signal.stop_loss}."
             )
         if not remaining_targets:
             raise ValueError(
-                f"Paper signal skipped: current price {start_price} is already beyond all targets for this {signal.side} setup."
+                f"{label} signal skipped: current price {start_price} is already beyond all targets for this {signal.side} setup."
             )
         return ParsedSignal(
             market=signal.market,
@@ -79,6 +79,9 @@ class TradeManager:
             entry_range=signal.entry_range,
             raw_text=signal.raw_text,
         )
+
+    def prepare_paper_signal(self, signal: ParsedSignal) -> ParsedSignal:
+        return self.prepare_market_signal(signal, label="Paper")
 
     def _filter_paper_targets(self, side: str, start_price: Decimal, targets: list[Decimal]) -> list[Decimal]:
         if side == "long":
