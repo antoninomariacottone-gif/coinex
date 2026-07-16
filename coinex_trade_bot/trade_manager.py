@@ -234,6 +234,8 @@ class TradeManager:
             )
             state.entry_order_id = entry_response["order_id"]
             self._touch(state, note=f"Entry order placed: {entry_response['order_id']}", status="entry_submitted")
+            if self.settings.entry_order_type == "market":
+                await self._protect_market_entry_immediately(signal, plan, state, market_info)
             return state
         except Exception as exc:
             state.closed = True
@@ -494,6 +496,30 @@ class TradeManager:
         state.take_profit_order_ids = tp_ids
         state.exits_placed = True
         self._touch(state, note="Single position exit ladder placed", status="protected")
+
+    async def _protect_market_entry_immediately(
+        self,
+        signal: ParsedSignal,
+        plan: PositionPlan,
+        state: ManagedTradeState,
+        market_info: MarketInfo,
+    ) -> None:
+        for attempt in range(1, 13):
+            try:
+                await self._reconcile_live_position(signal, plan, state, market_info)
+            except Exception as exc:  # noqa: BLE001
+                LOGGER.warning("Immediate protection attempt %s failed for %s: %s", attempt, state.trade_id, exc)
+                self._touch(state, note=f"Initial protection attempt {attempt} failed: {exc}")
+            if state.exits_placed:
+                self._touch(state, note=f"Initial SL/TP confirmed after market entry attempt {attempt}", status="protected")
+                return
+            await asyncio.sleep(0.5)
+
+        self._touch(
+            state,
+            note="Initial SL/TP not confirmed yet; live monitor will keep reconciling",
+            status="entry_submitted",
+        )
 
     async def _move_stop_to_break_even(self, signal: ParsedSignal, state: ManagedTradeState) -> None:
         if state.break_even_moved:
