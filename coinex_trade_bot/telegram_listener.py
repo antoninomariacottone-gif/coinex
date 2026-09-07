@@ -23,6 +23,7 @@ class TelegramSignalListener:
         self.started_at = datetime.now(timezone.utc)
         self.client: TelegramClient | None = None
         self._run_task: asyncio.Task | None = None
+        self._stopping = False
 
     @property
     def configured(self) -> bool:
@@ -41,13 +42,16 @@ class TelegramSignalListener:
             LOGGER.warning("Telegram listener enabled but not fully configured")
             return
 
+        if self._run_task and not self._run_task.done():
+            return
+
+        self._stopping = False
+
         self.client = TelegramClient(
             StringSession(self.settings.telegram_session_string),
             self.settings.telegram_api_id,
             self.settings.telegram_api_hash,
         )
-        await self.client.connect()
-
         async def _process_event(
             event,
             execution_mode: str,
@@ -152,7 +156,26 @@ class TelegramSignalListener:
                     )
                     return
 
-        self._run_task = asyncio.create_task(self.client.run_until_disconnected())
+        async def _run_forever() -> None:
+            backoff = 5
+            while not self._stopping:
+                try:
+                    if not self.client or not self.client.is_connected():
+                        await self.client.connect()
+                    LOGGER.info("Telegram connection established")
+                    backoff = 5
+                    await self.client.run_until_disconnected()
+                    if not self._stopping:
+                        LOGGER.warning("Telegram disconnected; reconnecting in %ss", backoff)
+                except asyncio.CancelledError:
+                    raise
+                except Exception as exc:  # noqa: BLE001
+                    LOGGER.exception("Telegram listener error; reconnecting in %ss: %s", backoff, exc)
+                if not self._stopping:
+                    await asyncio.sleep(backoff)
+                    backoff = min(backoff * 2, 60)
+
+        self._run_task = asyncio.create_task(_run_forever())
         LOGGER.info(
             "Telegram listener started. Live chats: %s | Paper chats: %s",
             ", ".join(self.settings.telegram_source_chats) or "-",
@@ -160,6 +183,7 @@ class TelegramSignalListener:
         )
 
     async def stop(self) -> None:
+        self._stopping = True
         if self.client is not None:
             await self.client.disconnect()
         if self._run_task and not self._run_task.done():

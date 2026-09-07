@@ -85,7 +85,10 @@ def require_auth(credentials: Annotated[HTTPBasicCredentials, Depends(security)]
 @app.on_event("startup")
 async def on_startup() -> None:
     await service.startup()
-    await telegram_listener.start()
+    try:
+        await telegram_listener.start()
+    except Exception as exc:  # noqa: BLE001
+        LOGGER.exception("Telegram listener did not start; the web service will keep running: %s", exc)
 
 
 @app.get("/healthz")

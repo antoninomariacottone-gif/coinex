@@ -29,6 +29,7 @@ class BotService:
         self.trade_manager = TradeManager(settings, client, store)
         self._trade_tasks: dict[str, asyncio.Task] = {}
         self._lock = asyncio.Lock()
+        self._startup_retry_task: asyncio.Task | None = None
 
     def _register_trade_task(self, trade_id: str, task: asyncio.Task) -> None:
         self._trade_tasks[trade_id] = task
@@ -266,9 +267,30 @@ class BotService:
         return status
 
     async def startup(self) -> None:
+        try:
+            self._resume_active_trades()
+        except Exception as exc:  # noqa: BLE001
+            LOGGER.warning("Database unavailable at startup; active trades will be resumed after reconnect: %s", exc)
+            self._startup_retry_task = asyncio.create_task(self._retry_startup())
+
+    def _resume_active_trades(self) -> None:
         for state in self.store.load_active():
+            if state.trade_id in self._trade_tasks:
+                continue
             LOGGER.info("Resuming active trade %s for %s", state.trade_id, state.market)
             self._register_trade_task(state.trade_id, asyncio.create_task(self.trade_manager.resume_trade_from_state(state)))
+
+    async def _retry_startup(self) -> None:
+        while True:
+            await asyncio.sleep(15)
+            try:
+                self._resume_active_trades()
+                LOGGER.info("Database reconnected; startup recovery completed")
+                return
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:  # noqa: BLE001
+                LOGGER.warning("Startup recovery still waiting for database: %s", exc)
 
     async def submit_signal(
         self,

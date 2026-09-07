@@ -299,14 +299,24 @@ class TradeManager:
             break_even_price=Decimal(state.break_even_price),
             raw_text=state.raw_signal_text,
         )
-        market_info = self.client.get_market_info(state.market)
         tp_amounts = [Decimal(value) for value in state.tp_amounts] if state.tp_amounts else []
         position_size = Decimal(state.position_size) if state.position_size else Decimal("0")
         plan = PositionPlan(size=position_size, tp_amounts=tp_amounts, remainder=tp_amounts[-1] if tp_amounts else Decimal("0"))
-        if state.execution_mode == "paper":
-            await self.monitor_paper_trade(signal, plan, state, market_info)
-        else:
-            await self.monitor_trade(signal, plan, state, market_info)
+        backoff = 5
+        while not state.closed:
+            try:
+                market_info = self.client.get_market_info(state.market)
+                if state.execution_mode == "paper":
+                    await self.monitor_paper_trade(signal, plan, state, market_info)
+                else:
+                    await self.monitor_trade(signal, plan, state, market_info)
+                return
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:  # noqa: BLE001
+                LOGGER.exception("Trade monitor disconnected for %s; retrying in %ss: %s", state.trade_id, backoff, exc)
+                await asyncio.sleep(backoff)
+                backoff = min(backoff * 2, 60)
 
     async def close_trade(self, state: ManagedTradeState) -> ManagedTradeState:
         if state.execution_mode == "paper":

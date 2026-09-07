@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+from threading import RLock
 from contextlib import contextmanager
 
 from sqlalchemy import inspect, text
@@ -50,13 +51,34 @@ class Database:
     def __init__(self, database_url: str):
         self.database_url = database_url
         connect_args = {"check_same_thread": False} if database_url.startswith("sqlite") else {}
-        self.engine = create_engine(database_url, future=True, connect_args=connect_args)
+        self.engine = create_engine(
+            database_url,
+            future=True,
+            connect_args=connect_args,
+            pool_pre_ping=True,
+            pool_recycle=300,
+        )
         self.SessionLocal = sessionmaker(bind=self.engine, autoflush=False, autocommit=False, future=True)
-        Base.metadata.create_all(self.engine)
-        LOGGER.info("Database ready: dialect=%s tables=%s", self.engine.dialect.name, ",".join(self.table_names()))
+        self._schema_ready = False
+        self._schema_lock = RLock()
+        try:
+            self.ensure_schema()
+        except Exception as exc:  # noqa: BLE001
+            LOGGER.warning("Database is temporarily unavailable during startup: %s", exc)
+
+    def ensure_schema(self) -> None:
+        if self._schema_ready:
+            return
+        with self._schema_lock:
+            if self._schema_ready:
+                return
+            Base.metadata.create_all(self.engine)
+            self._schema_ready = True
+            LOGGER.info("Database ready: dialect=%s tables=%s", self.engine.dialect.name, ",".join(self.table_names()))
 
     @contextmanager
     def session(self) -> Session:
+        self.ensure_schema()
         session = self.SessionLocal()
         try:
             yield session
@@ -76,9 +98,11 @@ class Database:
         return json.loads(payload_json)
 
     def table_names(self) -> list[str]:
+        self.ensure_schema()
         return sorted(inspect(self.engine).get_table_names())
 
     def status(self) -> dict[str, object]:
+        self.ensure_schema()
         with self.engine.connect() as connection:
             connection.execute(text("SELECT 1"))
         return {
